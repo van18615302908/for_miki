@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kindness Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-content">
+        <h1><a href="{{ url_for('index') }}">Kindness Hub</a></h1>
+        <nav>
+          <a class="pill" href="{{ url_for('submit_story') }}">分享故事</a>
+        </nav>
+      </div>
+    </header>
+    <main class="container">
+      {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="site-footer">
+      <div class="container">
+        <p>让善意被看见 · 无需登录即可分享和感受温暖</p>
+      </div>
+    </footer>
+  </body>
+</html>

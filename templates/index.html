@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">Kindness Stories</p>
+    <h2>把你的善意故事投递到这里</h2>
+    <p>不需要登录，随手记录暖心瞬间，让更多同学被点亮。</p>
+    <a class="btn primary" href="{{ url_for('submit_story') }}">写一个故事</a>
+  </div>
+</section>
+
+<section class="stories">
+  {% if stories %}
+    {% for story in stories %}
+      <article class="story-card">
+        <div class="story-header">
+          <div>
+            <h3>{{ story["title"] }}</h3>
+            <p class="meta">来自 {{ story["name"] }} · 更新于 {{ story["updated_at"].replace("T", " ") }}</p>
+          </div>
+          <form method="post" action="{{ url_for('like_story', story_id=story['id']) }}">
+            <button type="submit" class="like-btn">❤️ {{ story["likes"] }}</button>
+          </form>
+        </div>
+        <p class="story-body">{{ story["body"].replace("\n", "<br>")|safe }}</p>
+        <div class="story-footer">
+          <a href="{{ url_for('edit_story', story_id=story['id']) }}">编辑故事</a>
+        </div>
+      </article>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">
+      <p>暂无故事，成为第一个分享善意的人吧！</p>
+      <a class="btn secondary" href="{{ url_for('submit_story') }}">立即分享</a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

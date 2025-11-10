@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% set story_name = story['name'] if story else '' %}
+{% set story_title = story['title'] if story else '' %}
+{% set story_body = story['body'] if story else '' %}
+<section class="form-wrapper">
+  <h2>{{ "编辑善意故事" if story else "分享善意故事" }}</h2>
+  <p class="subtitle">留下你的名字、标题和故事内容，就能和大家互相取暖。</p>
+  <form method="post" action="{{ form_action }}">
+    <label>
+      昵称（可留空，默认匿名）：
+      <input type="text" name="name" placeholder="你的名字"
+             value="{{ story_name }}">
+    </label>
+    <label>
+      标题：
+      <input type="text" name="title" required placeholder="一句话概括你的善意"
+             value="{{ story_title }}">
+    </label>
+    <label>
+      故事内容：
+      <textarea name="body" rows="8" required placeholder="写下真实发生的善意瞬间">{{ story_body }}</textarea>
+    </label>
+    <div class="form-actions">
+      <a class="btn secondary" href="{{ url_for('index') }}">返回</a>
+      <button class="btn primary" type="submit">{{ "保存修改" if story else "提交故事" }}</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
