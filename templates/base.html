@@ -10,14 +10,18 @@
     <header class="site-header">
       <div class="container header-content">
         <h1><a href="{{ url_for('index') }}">Kindness Hub</a></h1>
-        <nav>
+        <nav class="header-links">
           <a class="pill" href="{{ url_for('submit_story') }}">分享故事</a>
+          <a class="pill subtle" href="{{ url_for('admin_panel') }}">后台审核</a>
         </nav>
       </div>
     </header>
     <main class="container">
       {% if error %}
         <div class="alert alert-error">{{ error }}</div>
+      {% endif %}
+      {% if info_message %}
+        <div class="alert alert-info">{{ info_message }}</div>
       {% endif %}
       {% block content %}{% endblock %}
     </main>

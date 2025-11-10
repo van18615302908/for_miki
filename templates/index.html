@@ -6,9 +6,35 @@
     <p class="eyebrow">Kindness Stories</p>
     <h2>把你的善意故事投递到这里</h2>
     <p>不需要登录，随手记录暖心瞬间，让更多同学被点亮。</p>
-    <a class="btn primary" href="{{ url_for('submit_story') }}">写一个故事</a>
   </div>
 </section>
+
+{% if tags %}
+<section class="tag-filter">
+  <div class="tag-chip-wrapper">
+    <a class="tag-chip {{ 'active' if not active_tag }}" href="{{ url_for('index', q=search_query, sort=sort_param) }}">全部</a>
+    {% for tag in tags %}
+      <a class="tag-chip {{ 'active' if active_tag == tag['id'] }}" href="{{ url_for('index', tag=tag['id'], q=search_query, sort=sort_param) }}">
+        {{ tag["name"] }}
+      </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<div class="result-row">
+  <p class="result-hint">
+    {% if active_tag or search_query %}
+      共 {{ stories|length }} 条匹配结果
+    {% else %}
+      最近的善意故事
+    {% endif %}
+  </p>
+  <div class="sort-switch">
+    <a class="sort-chip {{ 'active' if sort_param == 'likes' }}" href="{{ url_for('index', tag=active_tag, q=search_query, sort='likes') }}">按点赞</a>
+    <a class="sort-chip {{ 'active' if sort_param == 'latest' }}" href="{{ url_for('index', tag=active_tag, q=search_query, sort='latest') }}">按最新</a>
+  </div>
+</div>
 
 <section class="stories">
   {% if stories %}
@@ -19,16 +45,35 @@
             <h3>{{ story["title"] }}</h3>
             <p class="meta">来自 {{ story["name"] }} · 更新于 {{ story["updated_at"].replace("T", " ") }}</p>
           </div>
+          {% set liked = story["id"] in liked_story_ids %}
           <form method="post" action="{{ url_for('like_story', story_id=story['id']) }}">
-            <button type="submit" class="like-btn">❤️ {{ story["likes"] }}</button>
+            <button type="submit" class="like-btn {{ 'active' if liked }}" title="{{ '取消点赞' if liked else '点赞' }}">
+              {{ ' ❤️已点赞' if liked else '🤍 点赞' }} {{ story["likes"] }}
+            </button>
           </form>
         </div>
+        {% if story["image_path"] %}
+          <div class="story-image">
+            <a href="{{ url_for('static', filename=story['image_path']) }}" target="_blank">
+              <img src="{{ url_for('static', filename=story['image_path']) }}" alt="kindness photo">
+            </a>
+          </div>
+        {% endif %}
+        {% if story["tags"] %}
+          <div class="tag-badges">
+            {% for tag in story["tags"] %}
+              <span class="tag-badge">{{ tag["name"] }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
         <p class="story-body">{{ story["body"].replace("\n", "<br>")|safe }}</p>
-        <div class="story-footer">
-          <a href="{{ url_for('edit_story', story_id=story['id']) }}">编辑故事</a>
-        </div>
       </article>
     {% endfor %}
+  {% elif search_query or active_tag %}
+    <div class="empty-state">
+      <p>没有找到匹配的故事，换个关键词或标签试试？</p>
+      <a class="btn secondary" href="{{ url_for('index') }}">清除筛选</a>
+    </div>
   {% else %}
     <div class="empty-state">
       <p>暂无故事，成为第一个分享善意的人吧！</p>

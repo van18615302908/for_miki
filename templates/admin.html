@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="admin-panel">
+  <div class="admin-headline">
+    <div>
+      <h2>心理老师审核区</h2>
+      <p class="subtitle">输入管理员密码「miki_the_best_vb_player」可审核发布或删除学生故事。</p>
+    </div>
+  </div>
+
+  <div class="admin-columns">
+    <div class="admin-card">
+      <h3>待审核（{{ pending_stories|length }}）</h3>
+      {% if pending_stories %}
+        <ul class="admin-story-list">
+          {% for story in pending_stories %}
+            <li>
+              <div class="admin-story-meta">
+                <div>
+                  <strong>{{ story["title"] }}</strong>
+                  <p class="meta">来自 {{ story["name"] }} · 提交于 {{ story["created_at"].replace("T", " ") }}</p>
+                </div>
+                {% if story["image_path"] %}
+                  <a href="{{ url_for('static', filename=story['image_path']) }}" target="_blank">
+                    <img class="admin-thumb" src="{{ url_for('static', filename=story['image_path']) }}" alt="upload preview">
+                  </a>
+                {% endif %}
+              </div>
+              {% if story["tags"] %}
+                <div class="tag-badges">
+                  {% for tag in story["tags"] %}
+                    <span class="tag-badge">{{ tag["name"] }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
+              <p class="admin-body">{{ story["body"] }}</p>
+              <form method="post" class="admin-approve-form">
+                <input type="hidden" name="story_id" value="{{ story['id'] }}">
+                <button class="btn primary" type="submit" name="action" value="approve">通过审核</button>
+                <button class="btn danger" type="submit" name="action" value="delete_story" onclick="return confirm('确定要删除这条故事吗？不可恢复。')">删除故事</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">暂无待审核的故事。</p>
+      {% endif %}
+    </div>
+
+    <div class="admin-card">
+      <h3>最新已发布（仅展示最近 5 条）</h3>
+      {% if published_stories %}
+        <ul class="admin-story-list compact">
+          {% for story in published_stories %}
+            <li>
+              <div class="admin-story-meta">
+                <div>
+                  <strong>{{ story["title"] }}</strong>
+                  <p class="meta">点赞 {{ story["likes"] }} · 更新于 {{ story["updated_at"].replace("T", " ") }}</p>
+                </div>
+              </div>
+              <form method="post" class="admin-approve-form">
+                <input type="hidden" name="story_id" value="{{ story['id'] }}">
+                <button class="btn danger" type="submit" name="action" value="delete_story" onclick="return confirm('删除后不可恢复，确定吗？')">删除故事</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">暂无已发布的故事。</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="admin-card tag-admin-card">
+    <h3>标签管理</h3>
+    {% if tag_overview %}
+      <ul class="tag-admin-list">
+        {% for tag in tag_overview %}
+          <li>
+            <span>{{ tag["name"] }}（{{ tag["story_count"] }} 条故事）</span>
+            <form method="post">
+              <input type="hidden" name="tag_id" value="{{ tag['id'] }}">
+              <button class="btn danger" type="submit" name="action" value="delete_tag" onclick="return confirm('删除标签会移除其下所有故事，确定吗？')">删除标签</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">暂无标签。</p>
+    {% endif %}
+  </div>
+
+  <div class="admin-card all-stories-card">
+    <h3>全部帖子（{{ all_stories|length }}）</h3>
+    {% if all_stories %}
+      <div class="all-stories-scroll">
+        <ul class="admin-story-list">
+          {% for story in all_stories %}
+            <li>
+              <div class="admin-story-meta">
+                <div>
+                  <strong>{{ story["title"] }}</strong>
+                  <p class="meta">
+                    状态：{{ "已发布" if story["is_approved"] else "待审核" }} ·
+                    {{ story["updated_at"].replace("T", " ") }}
+                  </p>
+                </div>
+                <form method="post" class="admin-approve-form">
+                  <input type="hidden" name="story_id" value="{{ story['id'] }}">
+                  <button class="btn danger" type="submit" name="action" value="delete_story" onclick="return confirm('确定删除这条帖子吗？')">删除</button>
+                </form>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% else %}
+      <p class="muted">暂无帖子。</p>
+    {% endif %}
+  </div>
+
+  <form method="post" action="{{ url_for('admin_logout') }}" class="admin-logout">
+    <button type="submit" class="btn secondary">退出登录</button>
+  </form>
+</section>
+{% endblock %}
