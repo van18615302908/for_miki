@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import os
 import re
-import sqlite3
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -9,6 +9,8 @@ from typing import Iterable, Sequence
 
 from flask import Flask, redirect, render_template, request, session, url_for
 from PIL import Image, UnidentifiedImageError
+from psycopg import connect
+from psycopg.rows import dict_row
 from werkzeug.utils import secure_filename
 
 
@@ -18,6 +20,24 @@ UPLOAD_FOLDER = BASE_DIR / "static" / "uploads"
 ADMIN_PASSWORD = "miki_the_best_vb_player"
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 MAX_IMAGE_SIZE = 512 * 1024  # 512KB upper limit
+EXTERNAL_DB_URL = os.environ.get(
+    "RAILWAY_EXTERNAL_DATABASE_URL",
+    "postgresql://postgres:UklApTBLjMEZJMvGFtQRciNgzIkacjSr@caboose.proxy.rlwy.net:44350/railway",
+)
+INTERNAL_DB_URL = os.environ.get(
+    "RAILWAY_INTERNAL_DATABASE_URL",
+    "postgresql://postgres:UklApTBLjMEZJMvGFtQRciNgzIkacjSr@postgres.railway.internal:5432/railway",
+)
+CUSTOM_DB_URL = os.environ.get("DATABASE_URL")
+IS_RAILWAY = any(
+    os.environ.get(var)
+    for var in (
+        "RAILWAY_STATIC_URL",
+        "RAILWAY_PROJECT_ID",
+        "RAILWAY_ENVIRONMENT_NAME",
+        "RAILWAY_DEPLOYMENT_ID",
+    )
+)
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "kindness-exchange"
@@ -25,19 +45,53 @@ app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 _db_initialized = False
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+# def get_connection():
+#     candidates: list[str] = []
+#     if CUSTOM_DB_URL:
+#         candidates.append(CUSTOM_DB_URL)
+#     else:
+#         if IS_RAILWAY:
+#             candidates.append(INTERNAL_DB_URL)
+#         candidates.append(EXTERNAL_DB_URL)
 
+#     last_exc: Exception | None = None
+#     for url in candidates:
+#         if not url:
+#             continue
+#         try:
+#             return connect(url, row_factory=dict_row)
+#         except Exception as exc:  # pragma: no cover - networking fallback
+#             last_exc = exc
+#             continue
+#     raise RuntimeError("无法连接数据库，请检查 DATABASE_URL 设置。") from last_exc
 
-def ensure_story_columns(conn: sqlite3.Connection) -> None:
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(stories)")}
-    if "image_path" not in columns:
-        conn.execute("ALTER TABLE stories ADD COLUMN image_path TEXT")
-    if "is_approved" not in columns:
-        conn.execute("ALTER TABLE stories ADD COLUMN is_approved INTEGER NOT NULL DEFAULT 0")
+def get_connection():
+    candidates: list[str] = []
+    if CUSTOM_DB_URL:
+        candidates.append(CUSTOM_DB_URL)
+    else:
+        if IS_RAILWAY:
+            candidates.append(INTERNAL_DB_URL)
+        candidates.append(EXTERNAL_DB_URL)
+
+    last_exc: Exception | None = None
+    for url in candidates:
+        if not url:
+            continue
+        try:
+            # 🔥 打印使用的 URL（脱敏处理）
+            safe_url = re.sub(r":\/\/([^:]+):([^@]+)@", r"://\\1:********@", url)
+            print(f"[DB] Trying database: {safe_url}")
+
+            conn = connect(url, row_factory=dict_row)
+
+            print(f"[DB] Connected successfully! Using: {safe_url}")  # 再打印一次确认
+            return conn
+        except Exception as exc:
+            last_exc = exc
+            continue
+    raise RuntimeError("无法连接数据库，请检查 DATABASE_URL 设置。") from last_exc
+
 
 
 def init_db() -> None:
@@ -45,20 +99,22 @@ def init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS stories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 title TEXT NOT NULL,
                 body TEXT NOT NULL,
                 likes INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                image_path TEXT,
+                is_approved INTEGER NOT NULL DEFAULT 0
             )
             """
         )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS tags (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL
             )
@@ -67,16 +123,12 @@ def init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS story_tags (
-                story_id INTEGER NOT NULL,
-                tag_id INTEGER NOT NULL,
-                PRIMARY KEY (story_id, tag_id),
-                FOREIGN KEY (story_id) REFERENCES stories (id) ON DELETE CASCADE,
-                FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
+                story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                PRIMARY KEY (story_id, tag_id)
             )
             """
         )
-        ensure_story_columns(conn)
-        conn.commit()
 
 
 def ensure_database() -> None:
@@ -104,9 +156,7 @@ def parse_new_tag_names(raw: str) -> list[str]:
     return seen
 
 
-def ensure_tag_ids(
-    conn: sqlite3.Connection, selected_ids: Sequence[int | str], new_tag_names: Sequence[str]
-) -> list[int]:
+def ensure_tag_ids(conn, selected_ids: Sequence[int | str], new_tag_names: Sequence[str]) -> list[int]:
     tag_ids: list[int] = []
     for tag_id in selected_ids:
         try:
@@ -116,15 +166,15 @@ def ensure_tag_ids(
 
     timestamp = datetime.utcnow().isoformat(timespec="seconds")
     for name in new_tag_names:
-        existing = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
+        existing = conn.execute("SELECT id FROM tags WHERE name = %s", (name,)).fetchone()
         if existing:
             tag_ids.append(existing["id"])
             continue
         cur = conn.execute(
-            "INSERT INTO tags (name, created_at) VALUES (?, ?)",
+            "INSERT INTO tags (name, created_at) VALUES (%s, %s) RETURNING id",
             (name, timestamp),
         )
-        tag_ids.append(cur.lastrowid)
+        tag_ids.append(cur.fetchone()["id"])
 
     unique_ids: list[int] = []
     seen: set[int] = set()
@@ -135,22 +185,23 @@ def ensure_tag_ids(
     return unique_ids
 
 
-def replace_story_tags(conn: sqlite3.Connection, story_id: int, tag_ids: Iterable[int]) -> None:
-    conn.execute("DELETE FROM story_tags WHERE story_id = ?", (story_id,))
+def replace_story_tags(conn, story_id: int, tag_ids: Iterable[int]) -> None:
+    conn.execute("DELETE FROM story_tags WHERE story_id = %s", (story_id,))
     pairs = [(story_id, tag_id) for tag_id in tag_ids]
     if pairs:
-        conn.executemany(
-            "INSERT INTO story_tags (story_id, tag_id) VALUES (?, ?)",
-            pairs,
-        )
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO story_tags (story_id, tag_id) VALUES (%s, %s)",
+                pairs,
+            )
 
 
-def fetch_all_tags() -> list[sqlite3.Row]:
+def fetch_all_tags() -> list[dict]:
     with get_connection() as conn:
-        return conn.execute("SELECT id, name FROM tags ORDER BY name COLLATE NOCASE").fetchall()
+        return conn.execute("SELECT id, name FROM tags ORDER BY LOWER(name)").fetchall()
 
 
-def fetch_tags_with_counts() -> list[sqlite3.Row]:
+def fetch_tags_with_counts() -> list[dict]:
     with get_connection() as conn:
         return conn.execute(
             """
@@ -159,13 +210,13 @@ def fetch_tags_with_counts() -> list[sqlite3.Row]:
             LEFT JOIN story_tags st ON st.tag_id = t.id
             LEFT JOIN stories s ON s.id = st.story_id AND s.is_approved = 1
             GROUP BY t.id
-            HAVING usage_count > 0
-            ORDER BY t.name COLLATE NOCASE
+            HAVING COUNT(st.story_id) > 0
+            ORDER BY LOWER(t.name)
             """
         ).fetchall()
 
 
-def fetch_tags_admin_overview() -> list[sqlite3.Row]:
+def fetch_tags_admin_overview() -> list[dict]:
     with get_connection() as conn:
         return conn.execute(
             """
@@ -173,12 +224,12 @@ def fetch_tags_admin_overview() -> list[sqlite3.Row]:
             FROM tags t
             LEFT JOIN story_tags st ON st.tag_id = t.id
             GROUP BY t.id
-            ORDER BY t.name COLLATE NOCASE
+            ORDER BY LOWER(t.name)
             """
         ).fetchall()
 
 
-def build_story_payload(row: sqlite3.Row) -> dict:
+def build_story_payload(row: dict) -> dict:
     story = dict(row)
     tag_names = story.pop("tag_names", "") or ""
     tag_ids = story.pop("tag_ids", "") or ""
@@ -206,8 +257,8 @@ def load_stories(
     query = f"""
         SELECT s.id, s.name, s.title, s.body, s.likes,
                s.created_at, s.updated_at, s.image_path, s.is_approved,
-               COALESCE(GROUP_CONCAT(t.name, '||'), '') AS tag_names,
-               COALESCE(GROUP_CONCAT(t.id, '||'), '') AS tag_ids
+               COALESCE(string_agg(DISTINCT t.name, '||'), '') AS tag_names,
+               COALESCE(string_agg(DISTINCT t.id::text, '||'), '') AS tag_ids
         FROM stories s
         LEFT JOIN story_tags st ON st.story_id = s.id
         LEFT JOIN tags t ON t.id = st.tag_id
@@ -314,7 +365,7 @@ def index():
             """
             EXISTS (
                 SELECT 1 FROM story_tags st2
-                WHERE st2.story_id = s.id AND st2.tag_id = ?
+                WHERE st2.story_id = s.id AND st2.tag_id = %s
             )
             """
         )
@@ -322,7 +373,7 @@ def index():
 
     if search_query:
         pattern = f"%{search_query}%"
-        where_clauses.append("(s.title LIKE ? OR s.body LIKE ? OR s.name LIKE ?)")
+        where_clauses.append("(s.title ILIKE %s OR s.body ILIKE %s OR s.name ILIKE %s)")
         params.extend([pattern, pattern, pattern])
 
     if sort_param not in {"likes", "latest"}:
@@ -428,11 +479,12 @@ def submit_story():
             cursor = conn.execute(
                 """
                 INSERT INTO stories (name, title, body, likes, created_at, updated_at, image_path, is_approved)
-                VALUES (?, ?, ?, 0, ?, ?, ?, 0)
+                VALUES (%s, %s, %s, 0, %s, %s, %s, 0)
+                RETURNING id
                 """,
                 (name, title, body, timestamp, timestamp, image_path),
             )
-            story_id = cursor.lastrowid
+            story_id = cursor.fetchone()["id"]
             tag_ids = ensure_tag_ids(conn, selected_tag_ids, new_tag_names)
             replace_story_tags(conn, story_id, tag_ids)
             conn.commit()
@@ -468,13 +520,13 @@ def admin_panel():
                         SELECT DISTINCT s.id
                         FROM stories s
                         JOIN story_tags st ON st.story_id = s.id
-                        WHERE st.tag_id = ?
+                        WHERE st.tag_id = %s
                         """,
                         (tag_id,),
                     ).fetchall()
                     for row in story_rows:
-                        conn.execute("DELETE FROM stories WHERE id = ?", (row["id"],))
-                    conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+                        conn.execute("DELETE FROM stories WHERE id = %s", (row["id"],))
+                    conn.execute("DELETE FROM tags WHERE id = %s", (tag_id,))
                     conn.commit()
                     info_message = "标签及其关联故事已删除。"
             else:
@@ -483,11 +535,11 @@ def admin_panel():
                     error = "缺少故事 ID。"
                 else:
                     if action == "delete_story":
-                        conn.execute("DELETE FROM stories WHERE id = ?", (story_id,))
+                        conn.execute("DELETE FROM stories WHERE id = %s", (story_id,))
                         info_message = "故事已被删除。"
                     else:
                         conn.execute(
-                            "UPDATE stories SET is_approved = 1, updated_at = ? WHERE id = ?",
+                            "UPDATE stories SET is_approved = 1, updated_at = %s WHERE id = %s",
                             (datetime.utcnow().isoformat(timespec="seconds"), story_id),
                         )
                         info_message = "故事已审核发布。"
@@ -527,7 +579,7 @@ def like_story(story_id: int):
 
     with get_connection() as conn:
         story = conn.execute(
-            "SELECT id, likes FROM stories WHERE id = ? AND is_approved = 1",
+            "SELECT id, likes FROM stories WHERE id = %s AND is_approved = 1",
             (story_id,),
         ).fetchone()
         if story is None:
@@ -539,14 +591,14 @@ def like_story(story_id: int):
                 """
                 UPDATE stories
                 SET likes = CASE WHEN likes > 0 THEN likes - 1 ELSE 0 END
-                WHERE id = ?
+                WHERE id = %s
                 """,
                 (story_id,),
             )
             liked_stories.remove(story_id)
         else:
             conn.execute(
-                "UPDATE stories SET likes = likes + 1 WHERE id = ?",
+                "UPDATE stories SET likes = likes + 1 WHERE id = %s",
                 (story_id,),
             )
             liked_stories.add(story_id)
