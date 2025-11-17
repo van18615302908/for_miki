@@ -1,0 +1,11 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "name": "miki",
+            "database": "${workspaceFolder:Assignment1_image_classifier}/stories.db"
+        }
+    ],
+    "sqltools.useNodeRuntime": true
+}

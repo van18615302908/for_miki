@@ -244,6 +244,7 @@ a {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
+  align-items: center;
 }
 
 .story-header h3 {
@@ -306,9 +307,49 @@ a {
   color: var(--primary);
 }
 
+.like-block {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.medal-badge {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
 .story-body {
   margin: 1rem 0 0;
   white-space: pre-wrap;
+}
+
+.story-body.collapsible {
+  position: relative;
+}
+
+.story-body.collapsible[data-collapsed="true"] {
+  max-height: 7.5rem;
+  overflow: hidden;
+}
+
+.story-body.collapsible[data-collapsed="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3rem;
+  background: linear-gradient(transparent, var(--card));
+}
+
+.text-toggle {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.2rem 0;
 }
 
 .empty-state {

@@ -3,10 +3,12 @@ from __future__ import annotations
 import re
 import sqlite3
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Iterable, Sequence
 
 from flask import Flask, redirect, render_template, request, session, url_for
+from PIL import Image, UnidentifiedImageError
 from werkzeug.utils import secure_filename
 
 
@@ -15,6 +17,7 @@ DATABASE_PATH = BASE_DIR / "stories.db"
 UPLOAD_FOLDER = BASE_DIR / "static" / "uploads"
 ADMIN_PASSWORD = "miki_the_best_vb_player"
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+MAX_IMAGE_SIZE = 512 * 1024  # 512KB upper limit
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "kindness-exchange"
@@ -221,17 +224,59 @@ def allowed_image(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
+def compress_image_to_limit(file_storage) -> bytes:
+    file_storage.stream.seek(0)
+    try:
+        image = Image.open(file_storage.stream)
+    except UnidentifiedImageError as exc:
+        raise ValueError("无法识别上传的图片，请改用 JPG/PNG 等常见格式。") from exc
+
+    if getattr(image, "is_animated", False):
+        image.seek(0)
+    image = image.convert("RGB")
+
+    quality = 90
+    buffer = BytesIO()
+    width, height = image.size
+
+    while True:
+        buffer.seek(0)
+        buffer.truncate()
+        image.save(buffer, format="JPEG", optimize=True, quality=quality)
+        current_size = buffer.tell()
+
+        if current_size <= MAX_IMAGE_SIZE or (quality <= 40 and max(width, height) <= 640):
+            break
+
+        if quality > 40:
+            quality -= 10
+        else:
+            width = max(1, int(width * 0.9))
+            height = max(1, int(height * 0.9))
+            image = image.resize((width, height), Image.LANCZOS)
+
+        if quality <= 20 and max(width, height) <= 480:
+            break
+
+    if buffer.tell() > MAX_IMAGE_SIZE:
+        raise ValueError("图片尺寸过大，压缩后仍超过 512KB，请上传更小的照片。")
+
+    return buffer.getvalue()
+
+
 def save_uploaded_image(file_storage) -> str | None:
     if not file_storage or not file_storage.filename:
         return None
     filename = secure_filename(file_storage.filename)
     if not filename or not allowed_image(filename):
-        return None
-    suffix = Path(filename).suffix.lower()
+        raise ValueError("仅支持 png/jpg/jpeg/gif/webp 格式的图片。")
+
+    compressed_bytes = compress_image_to_limit(file_storage)
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-    final_name = f"{timestamp}{suffix}"
+    final_name = f"{timestamp}.jpg"
     destination = UPLOAD_FOLDER / final_name
-    file_storage.save(destination)
+    with open(destination, "wb") as f:
+        f.write(compressed_bytes)
     return f"uploads/{final_name}"
 
 
@@ -329,7 +374,18 @@ def submit_story():
         selected_tag_ids = request.form.getlist("tags")
         new_tag_input = request.form.get("new_tags", "").strip()
         new_tag_names = parse_new_tag_names(new_tag_input)
-        image_file = request.files.get("photo")
+        photo_files = [f for f in request.files.getlist("photo") if f and f.filename]
+        if len(photo_files) > 1:
+            error = "一次最多上传 1 张照片。"
+            story = {"name": name, "title": title, "body": body}
+            return render_story_form(
+                form_action=url_for("submit_story"),
+                story=story,
+                error=error,
+                selected_tags=[int(t) for t in selected_tag_ids if t.isdigit()],
+                new_tag_input=new_tag_input,
+            )
+        image_file = photo_files[0] if photo_files else None
 
         if not validate_name(name):
             error = "昵称需包含班级和姓名，例如“高一3班 张三”。"
@@ -354,18 +410,18 @@ def submit_story():
             )
 
         image_path = None
-        if image_file and image_file.filename:
-            if not allowed_image(image_file.filename):
-                error = "仅支持 png/jpg/jpeg/gif/webp 图片格式。"
+        if image_file:
+            try:
+                image_path = save_uploaded_image(image_file)
+            except ValueError as exc:
                 story = {"name": name, "title": title, "body": body}
                 return render_story_form(
                     form_action=url_for("submit_story"),
                     story=story,
-                    error=error,
+                    error=str(exc),
                     selected_tags=[int(t) for t in selected_tag_ids if t.isdigit()],
                     new_tag_input=new_tag_input,
                 )
-            image_path = save_uploaded_image(image_file)
 
         timestamp = datetime.utcnow().isoformat(timespec="seconds")
         with get_connection() as conn:

@@ -45,12 +45,17 @@
             <h3>{{ story["title"] }}</h3>
             <p class="meta">来自 {{ story["name"] }} · 更新于 {{ story["updated_at"].replace("T", " ") }}</p>
           </div>
-          {% set liked = story["id"] in liked_story_ids %}
-          <form method="post" action="{{ url_for('like_story', story_id=story['id']) }}">
-            <button type="submit" class="like-btn {{ 'active' if liked }}" title="{{ '取消点赞' if liked else '点赞' }}">
-              {{ ' ❤️已点赞' if liked else '🤍 点赞' }} {{ story["likes"] }}
-            </button>
-          </form>
+          <div class="like-block">
+            {% if story["likes"]|int >= 25 %}
+              <img class="medal-badge" src="{{ url_for('static', filename='uploads/icons/medal.png') }}" alt="电子徽章" title="25+ 次点赞">
+            {% endif %}
+            {% set liked = story["id"] in liked_story_ids %}
+            <form method="post" action="{{ url_for('like_story', story_id=story['id']) }}">
+              <button type="submit" class="like-btn {{ 'active' if liked }}" title="{{ '取消点赞' if liked else '点赞' }}">
+                {{ ' ❤️已点赞' if liked else '🤍 点赞' }} {{ story["likes"] }}
+              </button>
+            </form>
+          </div>
         </div>
         {% if story["image_path"] %}
           <div class="story-image">
@@ -66,7 +71,14 @@
             {% endfor %}
           </div>
         {% endif %}
-        <p class="story-body">{{ story["body"].replace("\n", "<br>")|safe }}</p>
+        {% set body_id = "story-body-" ~ story["id"] %}
+        {% set is_long = story["body"]|length > 220 %}
+        <div id="{{ body_id }}" class="story-body{% if is_long %} collapsible{% endif %}" {% if is_long %}data-collapsed="true"{% endif %}>
+          {{ story["body"].replace("\n", "<br>")|safe }}
+        </div>
+        {% if is_long %}
+          <button type="button" class="text-toggle" data-story-toggle="{{ body_id }}">展开全文</button>
+        {% endif %}
       </article>
     {% endfor %}
   {% elif search_query or active_tag %}
